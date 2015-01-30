@@ -1,5 +1,5 @@
 var config = require('../config')
-var createServer = require('fxa-auth-db-server')
+var createServer = require('fxa-auth-db-server').createServer
 var error = require('../error')
 var log = require('../log')(config.logLevel, 'db-api')
 var DB = require('../db/mysql')(log, error)

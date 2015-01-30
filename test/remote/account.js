@@ -20,6 +20,9 @@ var cfg = {
 var testServer = new TestServer(cfg)
 var client = clientThen({ url : 'http://127.0.0.1:' + cfg.port })
 
+var ACCOUNT_FIELDS = 'accountId,email,emailCode,kA,verifierVersion,verifyHash,authSalt'.split(',')
+
+
 test(
   'startup',
   function (t) {
@@ -66,7 +69,7 @@ test(
 test(
   'add account, retrieve it, delete it',
   function (t) {
-    t.plan(31)
+    /*t.plan(31)*/
     var user = fake.newUserDataHex()
     client.putThen('/account/' + user.accountId, user.account)
       .then(function(r) {
@@ -77,8 +80,7 @@ test(
         respOk(t, r)
 
         var account = r.obj
-        var fields = 'accountId,email,emailCode,kA,verifierVersion,verifyHash,authSalt'.split(',')
-        fields.forEach(function(f) {
+        ACCOUNT_FIELDS.forEach(function(f) {
           t.equal(user.account[f], account[f], 'Both Fields ' + f + ' are the same')
         })
         t.equal(user.account.emailVerified, !!account.emailVerified, 'Both fields emailVerified are the same')
@@ -95,11 +97,11 @@ test(
       .then(function(r) {
         respOk(t, r)
         var account = r.obj
-        var fields = 'accountId,email,emailCode,kA,verifierVersion,verifyHash,authSalt'.split(',')
-        fields.forEach(function(f) {
+        ACCOUNT_FIELDS.forEach(function(f) {
           t.equal(user.account[f], account[f], 'Both Fields ' + f + ' are the same')
         })
         t.equal(user.account.emailVerified, !!account.emailVerified, 'Both fields emailVerified are the same')
+        t.equal(!!user.account.lockedAt, !!account.lockedAt, 'Both fields lockedAt are falsey')
       })
       .then(function() {
         return client.delThen('/account/' + user.accountId)
@@ -439,6 +441,97 @@ test(
       })
   }
 )
+
+test(
+  'lockedAt',
+  function (t) {
+    var user = fake.newUserDataHex()
+    var lockedAt = Date.now()
+    client.putThen('/account/' + user.accountId, user.account)
+      .then(function (r) {
+        respOk(t, r)
+        return client.postThen('/account/' + user.accountId + '/lock', { lockedAt : lockedAt })
+      })
+      .then(null, function (err) {
+        t.fail('account/lock failed: ' + String(err));
+      })
+      .then(function(r) {
+        respOkEmpty(t, r)
+        return client.getThen('/emailRecord/' + emailToHex(user.account.email))
+      }, function (err) {
+        t.fail('emailRecord 1 failed: ' + String(err));
+      })
+      .then(function(r) {
+        respOk(t, r)
+        var account = r.obj
+        ACCOUNT_FIELDS.forEach(function(f) {
+          t.equal(user.account[f], account[f], 'Both Fields ' + f + ' are the same')
+        })
+        t.equal(user.account.emailVerified, !!account.emailVerified, 'Both fields emailVerified are the same')
+        console.log(user.account)
+        t.equal(account.lockedAt, lockedAt, 'lockedAt is now set to what was provided')
+        // unlock the account
+        return client.postThen('/account/' + user.accountId + '/unlock')
+      }, function (err) {
+        t.fail('account/unlock failed: ' + String(err));
+      })
+      .then(function(r) {
+        respOk(t, r)
+
+        return client.getThen('/emailRecord/' + emailToHex(user.account.email))
+      }, function (err) {
+        t.fail('emailRecord 2 failed: ' + String(err));
+      })
+      .then(function(r) {
+        respOk(t, r)
+        var account = r.obj
+        ACCOUNT_FIELDS.forEach(function(f) {
+          t.equal(user.account[f], account[f], 'Both Fields ' + f + ' are the same')
+        })
+        t.equal(!!account.lockedAt, false, 'lockedAt is falsey')
+
+        // re-lock the account
+        return client.postThen('/account/' + user.accountId + '/lock', { lockedAt : lockedAt })
+      }, function (err) {
+        t.fail('/account/lock 2 failed: ' + String(err));
+      })
+      .then(function(r) {
+        respOk(t, r)
+
+        // unlock the account by performing a passwordForgotToken
+        return client.putThen('/passwordForgotToken/' + user.passwordForgotTokenId, user.passwordForgotToken)
+      }, function (err) {
+        t.fail('/passwordForgotToken failed: ' + String(err));
+      })
+      .then(function(r) {
+        respOk(t, r)
+        // now, verify the password (which inserts the accountResetToken)
+        user.accountResetToken.tokenId = user.accountResetTokenId
+        return client.postThen('/passwordForgotToken/' + user.passwordForgotTokenId + '/verified', user.accountResetToken)
+      })
+      .then(function(r) {
+        respOk(t, r)
+        return client.getThen('/emailRecord/' + emailToHex(user.account.email))
+      })
+      .then(function(r) {
+        respOk(t, r)
+        var account = r.obj
+        ACCOUNT_FIELDS.forEach(function(f) {
+          t.equal(user.account[f], account[f], 'Both Fields ' + f + ' are the same')
+        })
+        t.equal(user.account.emailVerified, !account.emailVerified, 'Email is verified now')
+        t.equal(!!account.lockedAt, false, 'lockedAt is falsey')
+      })
+      .then(function(r) {
+        t.pass('All lockedAt tests passed')
+        t.end()
+      }, function(err) {
+        t.fail(err)
+        t.end()
+      })
+  }
+)
+
 
 test(
   'teardown',

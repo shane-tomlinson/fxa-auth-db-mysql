@@ -283,7 +283,7 @@ module.exports = function (log, error) {
   }
 
   var EMAIL_RECORD = 'SELECT uid, email, normalizedEmail, emailVerified, emailCode,' +
-    ' kA, wrapWrapKb, verifierVersion, verifyHash, authSalt, verifierSetAt' +
+    ' kA, wrapWrapKb, verifierVersion, verifyHash, authSalt, verifierSetAt, lockedAt' +
     ' FROM accounts' +
     ' WHERE normalizedEmail = LOWER(?)'
 
@@ -292,7 +292,8 @@ module.exports = function (log, error) {
   }
 
   var ACCOUNT = 'SELECT uid, email, normalizedEmail, emailCode, emailVerified, kA,' +
-    ' wrapWrapKb, verifierVersion, verifyHash, authSalt, verifierSetAt, createdAt' +
+    ' wrapWrapKb, verifierVersion, verifyHash, authSalt, verifierSetAt, createdAt,' +
+    ' lockedAt' +
     ' FROM accounts WHERE uid = ?'
 
   MySql.prototype.account = function (uid) {
@@ -424,11 +425,29 @@ module.exports = function (log, error) {
             connection,
             VERIFY_EMAIL,
             [accountResetToken.uid]
+          ),
+          query(
+            connection,
+            UPDATE_LOCKED_AT,
+            [null, accountResetToken.uid]
           )
         ])
       }
     )
   }
+
+  var UPDATE_LOCKED_AT = 'UPDATE accounts SET lockedAt = ? WHERE uid = ?'
+
+  MySql.prototype.updateLockedAt = function (uid, data) {
+    // even though we only want lockedAt, restify gives us data.lockedAt in an object
+    return this.write(UPDATE_LOCKED_AT, [data.lockedAt, uid])
+  }
+
+  MySql.prototype.deleteLockedAt = function (uid) {
+    // an unlocked account has lockedAt=null
+    return this.write(UPDATE_LOCKED_AT, [null, uid])
+  }
+
 
   // Internal
 

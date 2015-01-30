@@ -25,7 +25,7 @@ var ACCOUNT = {
   authSalt: zeroBuffer32,
   kA: zeroBuffer32,
   wrapWrapKb: zeroBuffer32,
-  verifierSetAt: Date.now(),
+  verifierSetAt: Date.now()
 }
 
 function hex(len) {
@@ -94,7 +94,7 @@ DB.connect(config)
       test(
         'account creation',
         function (t) {
-          t.plan(31)
+          /*t.plan(31)*/
           var hexEmail = Buffer(ACCOUNT.email).toString('hex')
           return db.accountExists(hexEmail)
           .then(function(exists) {
@@ -129,6 +129,7 @@ DB.connect(config)
             t.equal(account.verifierVersion, ACCOUNT.verifierVersion, 'verifierVersion')
             t.equal(account.verifierSetAt, account.createdAt, 'verifierSetAt has been set to the same as createdAt')
             t.ok(account.createdAt)
+            t.equal(account.lockedAt, null, 'lockedAt is not set to anything')
           })
           .then(function() {
             t.pass('Retrieving account using email')
@@ -302,6 +303,8 @@ DB.connect(config)
       test(
         'email verification',
         function (t) {
+          t.plan(4)
+
           var hexEmail = Buffer(ACCOUNT.email).toString('hex')
           return db.emailRecord(hexEmail)
           .then(function(emailRecord) {
@@ -314,15 +317,57 @@ DB.connect(config)
           .then(function(account) {
             t.ok(account.emailVerified, 'account should now be emailVerified (truthy)')
             t.equal(account.emailVerified, 1, 'account should now be emailVerified (1)')
-          })
-          .then(function() {
             // test verifyEmail for a non-existant account
             return db.verifyEmail(uuid.v4('binary'))
-          })
-          .then(function(res) {
-            t.deepEqual(res, {}, 'No matter what happens, we get an empty object back')
           }, function(err) {
             t.fail('We should not have failed this .verifyEmail() request')
+          })
+          .then(function(res) {
+            t.deepEqual(res, {}, 'Returned an empty object for verifyEmail, for a non-existant email')
+          })
+        }
+      )
+
+      test(
+        'locked accounts',
+        function (t) {
+          t.plan(4)
+
+          var lockedAt = Date.now()
+
+          var hexEmail = Buffer(ACCOUNT.email).toString('hex')
+          return db.emailRecord(hexEmail)
+          .then(function(emailRecord) {
+            return db.verifyEmail(emailRecord.uid)
+          })
+          .then(function () {
+
+            // set lockedAt
+            return db.updateLockedAt(ACCOUNT.uid, { lockedAt: lockedAt })
+          }, function(err) {
+            t.fail('We should not have failed this .updateLockedAt() request')
+          })
+          .then(function(result) {
+            t.deepEqual(result, {}, 'Returned an empty object for updateLockedAt')
+            // now check it's been saved
+            var hexEmail = Buffer(ACCOUNT.email).toString('hex')
+            return db.emailRecord(hexEmail)
+          })
+          .then(function(account) {
+            t.equal(account.lockedAt, lockedAt, 'account should now be locked')
+
+            // try to unlock the account
+            return db.deleteLockedAt(ACCOUNT.uid);
+          }, function(err) {
+            t.fail('We should not have failed this .deleteLockedAt() request')
+          })
+          .then(function(result) {
+            t.deepEqual(result, {}, 'Returned an empty object for deleteLockedAt')
+            // now check it's been saved
+            return db.emailRecord(Buffer(ACCOUNT.email))
+          })
+          .then(function(account) {
+            t.equal(account.lockedAt, null, 'account should now be unlocked')
           })
         }
       )
@@ -375,7 +420,7 @@ DB.connect(config)
             authSalt: zeroBuffer32,
             kA: zeroBuffer32,
             wrapWrapKb: zeroBuffer32,
-            verifierSetAt: Date.now(),
+            verifierSetAt: Date.now()
           }
           var PASSWORD_FORGOT_TOKEN_ID = hex32()
           var PASSWORD_FORGOT_TOKEN = {
@@ -404,10 +449,21 @@ DB.connect(config)
             })
             .then(function(passwordForgotToken) {
               t.pass('.createPasswordForgotToken() did not error')
+              // let's also lock the account here so we can check it is unlocked after the createPasswordForgotToken()
+              return db.updateLockedAt(ACCOUNT.uid, { lockedAt: Date.now() })
+            })
+            .then(function(passwordForgotToken) {
+              t.pass('.updateLockedAt() did not error')
               return db.forgotPasswordVerified(PASSWORD_FORGOT_TOKEN_ID, ACCOUNT_RESET_TOKEN)
             })
             .then(function() {
               t.pass('.forgotPasswordVerified() did not error')
+              // now check that the forgotPasswordVerified also reset the lockedAt
+              return db.emailRecord(Buffer(ACCOUNT.email))
+            })
+            .then(function(account) {
+              t.equal(account.lockedAt, null, 'account should now be unlocked')
+              // see if this token is still there (it shouldn't be)
               return db.passwordForgotToken(PASSWORD_FORGOT_TOKEN_ID)
             })
             .then(function(token) {

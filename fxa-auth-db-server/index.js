@@ -204,7 +204,7 @@ function createServer(db) {
 
   api.put(
     '/signinCodes/:code',
-    op(req => db.createSigninCode(req.params.code, req.body.uid, req.body.createdAt, req.body.flowId))
+    op(req => db.createSigninCode(req.params.code, req.body.uid, req.body.createdAt, req.body.flowId, req.body.signinCodeData))
   )
 
   api.post(
